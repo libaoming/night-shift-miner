@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0d181d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<style>:root{box-sizing:border-box;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}</style>
+<title>掘金夜班</title>
+<style>
+/* 布局：一屏掌机。顶栏读数，中间一口方形矿井，底部拇指区（方向盘 + 两个挖掘键）。单一深色外观。 */
+:root{
+  color-scheme:dark;
+  --bg:#0d181d; --shaft:#081115; --panel:#14262d; --panel-2:#1c353d; --line:#2b4a54;
+  --fg:#e8f1ec; --muted:#8eaaa8;
+  --gold:#f4b93e; --gold-deep:#b9791c;
+  --rust:#c2603f; --rust-deep:#6f2f20;
+  --danger:#e4588c; --ok:#6fd3a8;
+  --font-pix:"Silkscreen","Menlo","Consolas",monospace;
+  --font-ui:system-ui,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;
+  background:var(--bg);color:var(--fg);font-family:var(--font-ui);font-size:15px;line-height:1.5;
+  overflow:hidden;overscroll-behavior:none;touch-action:manipulation;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;
+}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+#app{
+  box-sizing:border-box;height:100%;max-width:560px;margin-inline:auto;
+  padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px));padding-block:10px 14px;
+  display:grid;gap:10px 12px;
+  grid-template-columns:1fr 1fr;grid-template-rows:auto minmax(0,1fr) auto;
+  grid-template-areas:"hud hud" "stage stage" "dpad digs";
+}
+
+/* 顶栏 */
+.hud{grid-area:hud;display:flex;align-items:center;gap:8px;min-width:0}
+.hud .lv{flex:1;min-width:0;display:flex;align-items:baseline;gap:8px}
+.lvno{font-family:var(--font-pix);font-size:18px;letter-spacing:.06em;color:var(--gold)}
+.lvname{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.count{display:flex;align-items:center;gap:6px;font-family:var(--font-pix);font-size:16px;font-variant-numeric:tabular-nums;
+  padding:6px 10px;border-radius:8px;background:var(--panel);color:var(--gold)}
+.count.open{color:var(--ok)}
+.count svg{width:18px;height:12px;flex:none}
+.icon-btn{width:40px;height:40px;flex:none;display:grid;place-items:center;border-radius:10px;background:var(--panel);color:var(--fg)}
+.icon-btn:active{background:var(--panel-2)}
+.icon-btn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* 矿井 */
+.stage{grid-area:stage;position:relative;min-width:0;min-height:0;overflow:hidden}
+#board{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--shaft);
+  border-radius:4px;box-shadow:0 0 0 1px var(--line);touch-action:none;image-rendering:pixelated}
+#banner{position:absolute;left:8px;right:8px;top:8px;margin-inline:auto;max-width:420px;box-sizing:border-box;
+  padding:10px 14px;border-radius:10px;background:rgba(13,24,29,.92);box-shadow:0 0 0 1px var(--line);
+  text-align:center;pointer-events:none}
+#banner .b-title{font-family:var(--font-pix);font-size:13px;letter-spacing:.14em;color:var(--gold)}
+#banner .b-title.ok{color:var(--ok)}
+#banner .b-text{margin-top:2px;font-size:14px;color:var(--fg);text-wrap:balance}
+#banner .b-sub{margin-top:4px;font-size:12px;color:var(--muted)}
+.kbd-only{display:none}
+@media (hover:hover) and (pointer:fine){.kbd-only{display:inline}}
+
+.overlay{position:absolute;inset:0;display:grid;place-items:center;padding:12px;background:rgba(8,17,21,.78)}
+.card{box-sizing:border-box;width:min(100%,340px);max-height:100%;overflow:auto;padding:18px;border-radius:14px;
+  background:var(--panel);box-shadow:0 0 0 1px var(--line);display:flex;flex-direction:column;gap:12px;text-align:center}
+.card h2{margin:0;font-size:20px;font-weight:700;text-wrap:balance}
+.card p{margin:0;color:var(--muted);font-size:14px}
+.card .stat{font-family:var(--font-pix);font-size:15px;color:var(--gold);font-variant-numeric:tabular-nums}
+.btns{display:flex;flex-direction:column;gap:8px}
+.btn{min-height:44px;border-radius:10px;background:var(--panel-2);font-weight:600}
+.btn.primary{background:var(--gold);color:#241803}
+.btn:active{filter:brightness(1.15)}
+.levels{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.lvbtn{position:relative;aspect-ratio:1;border-radius:10px;background:var(--panel-2);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:2px;font-family:var(--font-pix);font-size:14px}
+.lvbtn small{font-family:var(--font-ui);font-size:10px;color:var(--muted);white-space:nowrap}
+.lvbtn.done{box-shadow:inset 0 0 0 2px var(--gold-deep);color:var(--gold)}
+.lvbtn.cur{background:var(--gold);color:#241803}
+.lvbtn.cur small{color:#5b4208}
+
+/* 拇指区 */
+#dpad{grid-area:dpad;justify-self:start;align-self:center;width:clamp(128px,min(44vw,25vh),180px);aspect-ratio:1;touch-action:none;cursor:pointer}
+#dpad svg{display:block;width:100%;height:100%}
+#dpad .ring{fill:var(--panel)}
+#dpad .arm{fill:var(--panel-2)}
+#dpad .tri{fill:var(--muted)}
+#dpad .hub{fill:var(--line)}
+#dpad[data-dir="U"] .arm[data-a="U"],#dpad[data-dir="D"] .arm[data-a="D"],
+#dpad[data-dir="L"] .arm[data-a="L"],#dpad[data-dir="R"] .arm[data-a="R"]{fill:var(--gold)}
+#digs{grid-area:digs;justify-self:end;align-self:center;display:flex;gap:14px;align-items:center}
+.dig{width:clamp(64px,min(20vw,12vh),84px);aspect-ratio:1;border-radius:50%;touch-action:none;
+  background:var(--rust-deep);box-shadow:inset 0 0 0 2px var(--rust);color:#ffd9c9;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:12px;font-weight:600}
+.dig svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.dig.on,.dig:active{background:var(--rust);color:#fff}
+#digR{margin-bottom:26px}
+
+@media (orientation:landscape) and (max-height:540px){
+  #app{max-width:none;grid-template-columns:auto minmax(0,1fr) auto;grid-template-rows:auto minmax(0,1fr);
+    grid-template-areas:"dpad hud digs" "dpad stage digs"}
+  #dpad,#digs{align-self:end}
+  #digs{flex-direction:column-reverse}
+  #digR{margin-bottom:0}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="hud">
+    <button class="icon-btn" id="btnLevels" aria-label="选层">
+      <svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/></svg>
+    </button>
+    <div class="lv"><span class="lvno" id="lvno">B01</span><span class="lvname" id="lvname"></span></div>
+    <div class="count" id="count" aria-live="polite">
+      <svg viewBox="0 0 18 12" aria-hidden="true"><path d="M4 1h10l3 10H1z" fill="currentColor"/></svg>
+      <span id="countText">0/0</span>
+    </div>
+    <button class="icon-btn" id="btnSound" aria-label="声音" aria-pressed="false">
+      <svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path id="sndOn" d="M17 9a4 4 0 0 1 0 6" hidden/><path id="sndOff" d="M17 9l5 6M22 9l-5 6"/></svg>
+    </button>
+    <button class="icon-btn" id="btnPause" aria-label="暂停">
+      <svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>
+    </button>
+  </header>
+
+  <div class="stage" id="stage">
+    <canvas id="board" width="320" height="320"></canvas>
+    <div id="banner" hidden>
+      <div class="b-title" id="bTitle"></div>
+      <div class="b-text" id="bText"></div>
+      <div class="b-sub" id="bSub"></div>
+    </div>
+    <div class="overlay" id="overlay" hidden><div class="card" id="card"></div></div>
+  </div>
+
+  <div id="dpad" role="group" aria-label="方向盘">
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <circle class="ring" cx="50" cy="50" r="49"/>
+      <rect class="arm" data-a="U" x="36" y="6" width="28" height="30" rx="7"/>
+      <rect class="arm" data-a="D" x="36" y="64" width="28" height="30" rx="7"/>
+      <rect class="arm" data-a="L" x="6" y="36" width="30" height="28" rx="7"/>
+      <rect class="arm" data-a="R" x="64" y="36" width="30" height="28" rx="7"/>
+      <path class="tri" d="M50 14l7 11H43z"/><path class="tri" d="M50 86l7-11H43z"/>
+      <path class="tri" d="M14 50l11-7v14z"/><path class="tri" d="M86 50l-11-7v14z"/>
+      <circle class="hub" cx="50" cy="50" r="6"/>
+    </svg>
+  </div>
+  <div id="digs">
+    <button class="dig" id="digL" aria-label="向左下挖">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6L6 18M6 9v9h9"/></svg>挖左
+    </button>
+    <button class="dig" id="digR" aria-label="向右下挖">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 9v9H9"/></svg>挖右
+    </button>
+  </div>
+</div>
+
+<script>
+(()=>{
+'use strict';
+/*LEVELS-START*/
+// # 砖（能挖）  @ 石头（挖不动）  H 梯子  - 绳子  $ 金块  S 出口梯（收齐金块后出现）  P 矿工  E 守卫
+const COLS=16, ROWS=16;
+const LEVELS=[
+{name:'第一锹',tip:'踩着梯子把金块收齐，出口梯会从顶上放下来。',map:[
+'.......S........',
+'.......S........',
+'.......S........',
+'.......S........',
+'....$..S...$....',
+'###H#########H##',
+'...H.........H..',
+'...H....$....H..',
+'...H#######..H..',
+'...H.........H..',
+'.$.H.........H$.',
+'#####H####H#####',
+'.....H....H.....',
+'.....H....H.....',
+'.P...H..$.H.....',
+'@@@@@@@@@@@@@@@@']},
+{name:'往下挖',tip:'有两块金封在砖里。站在旁边朝斜下方挖，掉进去，再挖穿地板出来。',map:[
+'........S.......',
+'........S.......',
+'........S.......',
+'......E.S.....$.',
+'####H###########',
+'....H...........',
+'....H...........',
+'....H#########..',
+'....H..#.$$.#...',
+'....H..######...',
+'....H...........',
+'..$.H.......$...',
+'#####H##########',
+'.....H..........',
+'.P...H.....$....',
+'@@@@@@@@@@@@@@@@']},
+{name:'绳桥',tip:'绳子可以挂着走。挂在绳上按「下」会松手落下去。',map:[
+'S...............',
+'S...........$...',
+'S.........#####H',
+'####H..........H',
+'....H----------H',
+'....H....$.....H',
+'.$..H...###....H',
+'####H##.....####',
+'....H.#-----#...',
+'.E..H.#..$..#.E.',
+'##H####.###.##H#',
+'..H...........H.',
+'..H....$......H.',
+'..H...####....H.',
+'..H.....P.....H.',
+'@@@@@@@@@@@@@@@@']},
+{name:'金库',tip:'灰色石头挖不动，只有砖能挖。金库的地板上只有一块砖。',map:[
+'.......S........',
+'.......S........',
+'.......S....E...',
+'H##############H',
+'H..............H',
+'H@@@@@@##@@@@@@H',
+'H@.$...$...$..@H',
+'H@@@@@@@@@@@@#@H',
+'H..............H',
+'####H######H####',
+'....H......H....',
+'.$..H######H..$.',
+'####H.#$$#.H####',
+'....H.####.H....',
+'E...H...P..H....',
+'@@@@@@@@@@@@@@@@']},
+{name:'双塔',tip:'守卫掉进你挖的洞会卡住一会儿，这时可以踩着它的头走过去。',map:[
+'...S............',
+'...S............',
+'.$.S..........$.',
+'###H........H###',
+'...H--------H...',
+'...H........H...',
+'.$.H..E.....H.$.',
+'H###.######.####',
+'H..#........#...',
+'H..#-H----H-#...',
+'H....H.$$.H.....',
+'##H###.##.###H##',
+'..H..........H..',
+'..H..........H..',
+'E.H...$.P$...H..',
+'@@@@@@@@@@@@@@@@']},
+{name:'夹层',tip:'走廊里没处躲。挖洞困住守卫，或者挖穿地板换到下一层。',map:[
+'S...............',
+'S...............',
+'S..$....$....$..',
+'##############H#',
+'..............H.',
+'.E...$....$...H.',
+'#H##############',
+'.H..............',
+'.H..$....$....E.',
+'##############H#',
+'..............H.',
+'.E..$....$....H.',
+'#H##############',
+'.H..............',
+'.H......P...$...',
+'@@@@@@@@@@@@@@@@']},
+{name:'竖井',tip:'洞过几秒会自己合上。合上时人还在洞里，就出不来了。',map:[
+'.......S........',
+'.......S........',
+'....E..S........',
+'#######H########',
+'.......H........',
+'.$.....H......$.',
+'#######H########',
+'##$....H....$###',
+'####...H...#####',
+'#######H########',
+'.......H........',
+'....$..H...$..E.',
+'###.###H####.###',
+'.......H........',
+'...$...HP...$...',
+'@@@@@@@@@@@@@@@@']},
+{name:'蜂巢',tip:'先看清下面是什么再挖。挖在墙顶上，会卡在洞里出不来。',map:[
+'...............S',
+'...............S',
+'......E........S',
+'H###############',
+'H.$.#.$.#.$.#.$.',
+'H###############',
+'H..#.$.#.$.#.$.#',
+'H###############',
+'H.$.#.$.#.$.#.$.',
+'H###############',
+'H...............',
+'H...........E...',
+'H####-----######',
+'H...............',
+'H..P.......$....',
+'@@@@@@@@@@@@@@@@']},
+{name:'悬索',tip:'有些平台没有梯子通上去，只能从上面的绳子落下来。',map:[
+'S...............',
+'S...............',
+'S.$..........$..',
+'###H........H###',
+'...H--------H...',
+'...H...$$...H...',
+'.E.H..####..H.E.',
+'##H#--....--#H##',
+'..H....$.....H..',
+'..H---####---H..',
+'..H..........H..',
+'.$H...$..$...H$.',
+'H###.######.###H',
+'H...-......-...H',
+'H...P..........H',
+'@@@@@@@@@@@@@@@@']},
+{name:'金字塔',tip:'守卫会顺手拿走金块。把它困进洞里，金块会掉在洞口。',map:[
+'.......S........',
+'.......S........',
+'......$S$E......',
+'.....H####H.....',
+'.....H.$$.H.....',
+'...H########H...',
+'...H..$..$..H...',
+'.H############H.',
+'.H.$..E...$...H.',
+'H##############H',
+'H..............H',
+'H....$....$..E.H',
+'####H######H####',
+'....H......H....',
+'..$.H..P...H.$..',
+'@@@@@@@@@@@@@@@@']},
+{name:'回廊',tip:'中间的井道一路通到石顶。石顶中间那两块是砖。',map:[
+'...............S',
+'...............S',
+'.$....E........S',
+'H######..######H',
+'H.....#--#.....H',
+'H.$...#..#...$.H',
+'####H##..##H####',
+'....H......H....',
+'.E..H.$..$.H..E.',
+'#H####@##@####H#',
+'.H....@$$@....H.',
+'.H....@##@....H.',
+'##H####..####H##',
+'..H..........H..',
+'..H....P.....H..',
+'@@@@@@@@@@@@@@@@']},
+{name:'末班',tip:'最后一层：四个守卫，十块金。',map:[
+'.......S........',
+'.......S........',
+'.$..E..S...E..$.',
+'##H##########H##',
+'..H--......--H..',
+'..H..#@##@#..H..',
+'..H.$#$..$#$.H..',
+'H####@####@####H',
+'H..............H',
+'H$E.--------.E$H',
+'###H........H###',
+'...H..$##$..H...',
+'...H########H...',
+'...H........H...',
+'...H...P....H...',
+'@@@@@@@@@@@@@@@@']}
+];
+/*LEVELS-END*/
+
+// 速度单位：格/秒；时间单位：秒
+const RUN=6.2, CLIMB=5.2, FALL=9, GUARD=3.3, HOLE=8.5, TRAP=3.6, DIG=0.2, REFILL=1.2;
+const N=COLS*ROWS;
+const DX=[-1,1,0,0], DY=[0,0,-1,1];
+const DIRK={L:0,R:1,U:2,D:3};
+const C={shaft:'#081115',brick:'#c2603f',brickHi:'#dd8259',brickLo:'#8d3f2a',mortar:'#3b1a13',
+  stone:'#607985',stoneHi:'#86a0aa',stoneLo:'#3d525c',ladder:'#dcc98f',ladderLo:'#9c8750',
+  exit:'#6fd3a8',exitLo:'#3d8f6d',rope:'#b9a36a',gold:'#f4b93e',goldHi:'#ffe9a6',goldLo:'#b9791c'};
+const PAL_P={hat:'#f4b93e',lamp:'#fff6cf',skin:'#f1c7a2',ink:'#1a1210',body:'#e8f1ec',legs:'#4f8fd0'};
+const PAL_G={hat:'#8a2b55',skin:'#e9b8c9',ink:'#1a1210',body:'#e4588c',legs:'#5a2040'};
+const PAL_GG={hat:'#8a2b55',skin:'#e9b8c9',ink:'#1a1210',body:'#f4b93e',legs:'#5a2040'};
+
+const $=id=>document.getElementById(id);
+const cv=$('board'), ctx=cv.getContext('2d'), stage=$('stage');
+const banner=$('banner'), overlay=$('overlay'), card=$('card'), dpad=$('dpad');
+
+let grid, gold, hidden, exitSet, holes, guards, player;
+let cur=0, state='ready', goldTotal=0, goldGot=0, exitOpen=false;
+let time=0, attempts=0, deadT=0, wonT=0, clock=0, bannerT=0, menu=null;
+let ts=20, spr={};
+const input={held:null,queued:null,queuedT:0};
+let digReq=null;
+let save={done:{},last:0,sound:false};
+try{const s=JSON.parse(localStorage.getItem('juejin-yeban')||'null'); if(s&&typeof s==='object') save=Object.assign(save,s);}catch(e){}
+function persist(){try{localStorage.setItem('juejin-yeban',JSON.stringify(save));}catch(e){}}
+
+const idx=(x,y)=>y*COLS+x;
+const tile=(x,y)=>(x<0||x>=COLS||y<0||y>=ROWS)?'@':grid[y][x];
+const isSolid=c=>c==='#'||c==='@';
+
+/* ---------- 声音 ---------- */
+let actx=null;
+function tone(freq,dur,type,vol,slide,delay){
+  if(!save.sound) return;
+  try{
+    actx=actx||new (window.AudioContext||window.webkitAudioContext)();
+    if(actx.state==='suspended') actx.resume();
+    const t0=actx.currentTime+(delay||0), o=actx.createOscillator(), g=actx.createGain();
+    o.type=type||'square'; o.frequency.setValueAtTime(freq,t0);
+    if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(30,freq+slide),t0+dur);
+    g.gain.setValueAtTime(vol||0.05,t0); g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    o.connect(g); g.connect(actx.destination); o.start(t0); o.stop(t0+dur+0.02);
+  }catch(e){}
+}
+const sfx={
+  gold(){tone(880,.07);tone(1320,.12,'square',.05,0,.07);},
+  dig(){tone(190,.13,'sawtooth',.05,-110);},
+  trap(){tone(140,.12,'square',.05,-60);},
+  die(){tone(320,.5,'sawtooth',.06,-270);},
+  exit(){tone(660,.1);tone(880,.1,'square',.05,0,.1);tone(1100,.2,'square',.05,0,.2);},
+  win(){[523,659,784,1047].forEach((f,i)=>tone(f,.14,'square',.05,0,i*.11));}
+};
+function buzz(ms){try{navigator.vibrate&&navigator.vibrate(ms);}catch(e){}}
+
+/* ---------- 关卡 ---------- */
+function mkEnt(x,y){return {x,y,fx:x,fy:y,t:1,moving:false,spd:RUN,face:1,steps:0,falling:false};}
+function loadLevel(i,keepAttempts){
+  cur=i; const L=LEVELS[i];
+  grid=[]; gold=new Uint8Array(N); hidden=[]; exitSet=new Set(); holes=[]; guards=[]; goldTotal=0;
+  for(let y=0;y<ROWS;y++){
+    const row=[];
+    for(let x=0;x<COLS;x++){
+      const ch=L.map[y][x]; let t=' ';
+      if(ch==='#'||ch==='@'||ch==='H'||ch==='-') t=ch;
+      else if(ch==='$'){gold[idx(x,y)]=1;goldTotal++;}
+      else if(ch==='S') hidden.push([x,y]);
+      else if(ch==='P'){player=mkEnt(x,y);player.dig=0;}
+      else if(ch==='E'){const g=mkEnt(x,y);g.speed=GUARD+(L.gs||0);g.trapped=0;g.inHole=false;g.noFall=false;g.dead=false;g.respawn=0;g.spawn=0;g.gold=false;g.carry=0;g.noPick=0;g.face=-1;guards.push(g);}
+      row.push(t);
+    }
+    grid.push(row);
+  }
+  goldGot=0; exitOpen=false; time=0; state='ready'; digReq=null; input.queued=null; input.held=null; keysDown.length=0; delete dpad.dataset.dir;
+  if(!keepAttempts) attempts=0;
+  save.last=i; persist();
+  $('lvno').textContent='B'+String(i+1).padStart(2,'0');
+  $('lvname').textContent=L.name;
+  updateCount();
+  showBanner('B'+String(i+1).padStart(2,'0')+' '+L.name, L.tip, 'ready', 0);
+}
+function updateCount(){
+  $('countText').textContent=exitOpen?'EXIT':goldGot+'/'+goldTotal;
+  $('count').classList.toggle('open',exitOpen);
+}
+function showBanner(title,text,kind,secs){
+  $('bTitle').textContent=title; $('bTitle').classList.toggle('ok',kind==='ok');
+  $('bText').textContent=text;
+  const sub=$('bSub'); sub.textContent='';
+  if(kind==='ready'){
+    sub.append('动一下方向盘就开工');
+    const k=document.createElement('span'); k.className='kbd-only'; k.textContent='　键盘：方向键移动，Z / X 挖左右，P 暂停'; sub.append(k);
+  }
+  sub.hidden=kind!=='ready';
+  banner.hidden=false; bannerT=secs;
+}
+
+/* ---------- 移动 ---------- */
+function startMove(e,dx,dy,spd){e.fx=e.x;e.fy=e.y;e.x+=dx;e.y+=dy;e.t=0;e.moving=true;e.spd=spd;}
+function advance(e,budget){
+  const need=(1-e.t)/e.spd;
+  if(budget>=need){e.t=1;e.moving=false;e.fx=e.x;e.fy=e.y;e.steps++;return budget-need;}
+  e.t+=budget*e.spd; return 0;
+}
+const rx=e=>e.fx+(e.x-e.fx)*e.t, ry=e=>e.fy+(e.y-e.fy)*e.t;
+function guardAt(x,y,self){for(const g of guards) if(g!==self&&!g.dead&&g.x===x&&g.y===y) return g; return null;}
+function trappedGuardAt(x,y){for(const g of guards) if(!g.dead&&g.inHole&&g.x===x&&g.y===y) return true; return false;}
+
+function openHole(x,y){grid[y][x]='o'; holes.push({x,y,t:HOLE}); sfx.dig(); buzz(12);}
+
+function playerChoose(){
+  const p=player,x=p.x,y=p.y,c=tile(x,y),b=tile(x,y+1);
+  const sup=c==='H'||c==='-'||isSolid(b)||b==='H'||trappedGuardAt(x,y+1);
+  if(!sup) return {dx:0,dy:1,spd:FALL,fall:true};
+  if(digReq){
+    const d=digReq.dir,tx=x+d;
+    if(tile(tx,y+1)==='#'&&tile(tx,y)===' '&&!gold[idx(tx,y)]){
+      digReq=null; openHole(tx,y+1); p.face=d; return {dig:true};
+    }
+    digReq=null;
+  }
+  const dir=input.held||input.queued;
+  if(!dir) return null;
+  let m=null;
+  if(dir==='L'||dir==='R'){
+    const d=dir==='L'?-1:1; p.face=d;
+    if(!isSolid(tile(x+d,y))) m={dx:d,dy:0,spd:RUN};
+  }else if(dir==='U'){
+    if(c==='H'&&!isSolid(tile(x,y-1))) m={dx:0,dy:-1,spd:CLIMB};
+  }else if(dir==='D'){
+    if(!isSolid(b)&&!trappedGuardAt(x,y+1)) m=(b==='H'||c==='H')?{dx:0,dy:1,spd:CLIMB}:{dx:0,dy:1,spd:FALL,fall:true};
+  }
+  if(m&&dir===input.queued) input.queued=null;
+  return m;
+}
+function playerArrive(){
+  const p=player,i=idx(p.x,p.y);
+  if(gold[i]){
+    gold[i]=0; goldGot++; sfx.gold(); buzz(8);
+    if(goldGot===goldTotal) openExit();
+    updateCount();
+  }
+  if(exitOpen&&p.y===0) win();
+}
+function openExit(){
+  exitOpen=true;
+  for(const [x,y] of hidden){grid[y][x]='H'; exitSet.add(idx(x,y));}
+  sfx.exit();
+  showBanner('EXIT OPEN','出口梯放下来了，爬到最顶上。','ok',3);
+}
+function updatePlayer(dt){
+  const p=player;
+  if(p.dig>0){p.dig-=dt; if(p.dig>0) return; p.dig=0;}
+  let budget=dt, n=0;
+  while(budget>1e-6&&n++<4&&state==='play'){
+    if(!p.moving){
+      const m=playerChoose();
+      if(!m){p.falling=false;break;}
+      if(m.dig){p.dig=DIG;p.falling=false;break;}
+      p.falling=!!m.fall; startMove(p,m.dx,m.dy,m.spd);
+    }
+    budget=advance(p,budget);
+    if(!p.moving) playerArrive();
+  }
+}
+
+/* ---------- 守卫 ---------- */
+const bfsDist=new Int16Array(N), bfsFirst=new Int8Array(N), bfsQ=new Int16Array(N);
+const gt=(x,y)=>{const c=tile(x,y);return c==='o'?'#':c;}; // 守卫看不见洞
+function guardAI(g){
+  bfsDist.fill(-1);
+  const s=idx(g.x,g.y), tx=player.x, ty=player.y, target=idx(tx,ty);
+  const h=(x,y)=>Math.abs(x-tx)+2*Math.abs(y-ty);
+  let qh=0,qt=0,best=s,bestH=h(g.x,g.y);
+  bfsDist[s]=0; bfsFirst[s]=-1; bfsQ[qt++]=s;
+  while(qh<qt){
+    const i=bfsQ[qh++]; if(i===target){best=i;break;}
+    const x=i%COLS,y=(i/COLS)|0,c=gt(x,y),b=gt(x,y+1);
+    const sup=c==='H'||c==='-'||isSolid(b)||b==='H';
+    for(let k=0;k<4;k++){
+      if(!sup&&k!==3) continue;
+      if(k===2&&c!=='H') continue;
+      const nx=x+DX[k],ny=y+DY[k];
+      if(isSolid(gt(nx,ny))) continue;
+      const j=idx(nx,ny); if(bfsDist[j]>=0) continue;
+      bfsDist[j]=bfsDist[i]+1; bfsFirst[j]=i===s?k:bfsFirst[i];
+      const hh=h(nx,ny); if(hh<bestH){bestH=hh;best=j;}
+      bfsQ[qt++]=j;
+    }
+  }
+  if(best===s) return -1;
+  return bfsFirst[best];
+}
+function guardChoose(g){
+  const x=g.x,y=g.y,c=tile(x,y),b=tile(x,y+1);
+  const sup=c==='H'||c==='-'||isSolid(b)||b==='H'||(b==='o'&&g.noFall)||!!guardAt(x,y+1,g);
+  if(!sup){g.noFall=false;return {dx:0,dy:1,spd:FALL};}
+  if(g.gold&&g.carry<=0&&c===' '&&!gold[idx(x,y)]&&isSolid(b)){gold[idx(x,y)]=1;g.gold=false;}
+  const k=guardAI(g); if(k<0) return null;
+  const nx=x+DX[k],ny=y+DY[k];
+  if(guardAt(nx,ny,g)) return null;
+  g.noFall=false; if(DX[k]) g.face=DX[k];
+  return {dx:DX[k],dy:DY[k],spd:g.speed};
+}
+function guardArrive(g){
+  const i=idx(g.x,g.y);
+  if(tile(g.x,g.y)==='o'){
+    g.inHole=true; g.trapped=TRAP; sfx.trap();
+    if(g.gold&&tile(g.x,g.y-1)===' '&&!gold[idx(g.x,g.y-1)]){gold[idx(g.x,g.y-1)]=1;g.gold=false;}
+    return;
+  }
+  if(!g.gold&&g.noPick<=0&&gold[i]){gold[i]=0;g.gold=true;g.carry=5+Math.random()*7;}
+}
+function respawn(g){
+  const xs=[]; for(let x=0;x<COLS;x++) if(tile(x,0)===' '&&!guardAt(x,0,g)) xs.push(x);
+  const x=xs.length?xs[(Math.random()*xs.length)|0]:0;
+  g.x=g.fx=x; g.y=g.fy=0; g.t=1; g.moving=false; g.dead=false; g.inHole=false; g.trapped=0; g.noFall=false; g.spawn=0.7;
+}
+function updateGuard(g,dt){
+  if(g.dead){g.respawn-=dt; if(g.respawn<=0) respawn(g); return;}
+  if(g.spawn>0){g.spawn-=dt; return;}
+  if(g.gold) g.carry-=dt;
+  if(g.noPick>0) g.noPick-=dt;
+  if(g.trapped>0){
+    g.trapped-=dt; if(g.trapped>0) return;
+    if(!isSolid(tile(g.x,g.y-1))&&!guardAt(g.x,g.y-1,g)){g.trapped=0;g.inHole=false;g.noFall=true;g.noPick=1.5;startMove(g,0,-1,g.speed);}
+    else{g.trapped=0.2;return;}
+  }
+  let budget=dt,n=0;
+  while(budget>1e-6&&n++<4){
+    if(!g.moving){
+      const m=guardChoose(g); if(!m) break;
+      startMove(g,m.dx,m.dy,m.spd);
+    }
+    budget=advance(g,budget);
+    if(!g.moving){guardArrive(g); if(g.trapped>0) break;}
+  }
+}
+
+/* ---------- 每帧 ---------- */
+function inTile(e,x,y){return (e.x===x&&e.y===y)||(Math.round(rx(e))===x&&Math.round(ry(e))===y);}
+function update(dt){
+  time+=dt;
+  if(input.queued){input.queuedT-=dt; if(input.queuedT<=0) input.queued=null;}
+  if(digReq){digReq.ttl-=dt; if(digReq.ttl<=0) digReq=null;}
+  for(let i=holes.length-1;i>=0;i--){
+    const h=holes[i]; h.t-=dt;
+    if(h.t<=0){
+      grid[h.y][h.x]='#'; holes.splice(i,1);
+      for(const g of guards) if(!g.dead&&inTile(g,h.x,h.y)){g.dead=true;g.inHole=false;g.moving=false;g.respawn=1.2;}
+      if(inTile(player,h.x,h.y)){die();return;}
+    }
+  }
+  updatePlayer(dt);
+  if(state!=='play') return;
+  for(const g of guards) updateGuard(g,dt);
+  const px=rx(player),py=ry(player);
+  for(const g of guards){
+    if(g.dead||g.spawn>0) continue;
+    if(Math.abs(rx(g)-px)<0.6&&Math.abs(ry(g)-py)<0.6){die();return;}
+  }
+  if(bannerT>0){bannerT-=dt; if(bannerT<=0) banner.hidden=true;}
+}
+function die(){
+  if(state!=='play') return;
+  state='dead'; deadT=1.1; attempts++; sfx.die(); buzz(60); banner.hidden=true;
+}
+function win(){
+  if(state!=='play') return;
+  state='won'; wonT=0.7; sfx.win(); banner.hidden=true;
+  const best=save.done[cur];
+  if(best==null||time<best) save.done[cur]=Math.round(time*10)/10;
+  persist();
+}
+const fmt=s=>Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0');
+
+/* ---------- 画面 ---------- */
+function mk(draw){
+  const c=document.createElement('canvas'); c.width=c.height=ts; const g=c.getContext('2d'),u=ts/16;
+  const R=(x,y,w,h,col)=>{const x0=Math.round(x*u),y0=Math.round(y*u);g.fillStyle=col;g.fillRect(x0,y0,Math.round((x+w)*u)-x0,Math.round((y+h)*u)-y0);};
+  draw(R); return c;
+}
+function makeSprites(){
+  spr.brick=mk(R=>{
+    R(0,0,16,16,C.mortar);
+    [[0,0,7,7],[8,0,8,7],[0,8,3,7],[4,8,8,7],[13,8,3,7]].forEach(([x,y,w,h])=>{R(x,y,w,h,C.brick);R(x,y,w,1,C.brickHi);R(x,y+h-1,w,1,C.brickLo);});
+  });
+  spr.stone=mk(R=>{
+    R(0,0,16,16,C.stoneLo);R(1,1,14,14,C.stone);R(1,1,14,1,C.stoneHi);R(1,1,1,14,C.stoneHi);
+    [[3,3],[12,3],[3,12],[12,12]].forEach(([x,y])=>R(x,y,1,1,C.stoneLo));
+  });
+  const lad=(a,b)=>mk(R=>{R(3,0,2,16,b);R(11,0,2,16,b);R(3,3,10,2,a);R(3,11,10,2,a);R(3,0,1,16,a);R(11,0,1,16,a);});
+  spr.ladder=lad(C.ladder,C.ladderLo); spr.exit=lad(C.exit,C.exitLo);
+  spr.rope=mk(R=>{R(0,4,16,1,C.rope);R(3,5,1,1,C.ladderLo);R(11,5,1,1,C.ladderLo);});
+  spr.gold=mk(R=>{R(3,12,10,3,C.goldLo);R(4,11,8,3,C.gold);R(5,9,6,2,C.gold);R(6,9,4,1,C.goldHi);R(5,11,2,1,C.goldHi);});
+}
+function drawDude(e,pal,pose,frame,alpha){
+  const u=ts/16,ox=rx(e)*ts,oy=ry(e)*ts,face=e.face;
+  const R=(x,y,w,h,col)=>{
+    if(face<0) x=16-x-w;
+    const x0=Math.round(ox+x*u),y0=Math.round(oy+y*u);
+    ctx.fillStyle=col;ctx.fillRect(x0,y0,Math.round(ox+(x+w)*u)-x0,Math.round(oy+(y+h)*u)-y0);
+  };
+  ctx.globalAlpha=alpha;
+  R(5,1,6,2,pal.hat);R(5,3,7,1,pal.hat);
+  if(pal.lamp) R(10,1,2,2,pal.lamp);
+  R(6,4,5,3,pal.skin);R(9,5,1,1,pal.ink);
+  R(5,7,6,5,pal.body);
+  const S=pal.skin,L=pal.legs;
+  if(pose==='run'){
+    if(frame){R(3,8,2,1,S);R(11,9,2,1,S);R(4,12,3,2,L);R(3,14,2,2,L);R(9,12,2,4,L);}
+    else{R(3,9,2,1,S);R(11,8,2,1,S);R(6,12,2,4,L);R(9,12,3,2,L);R(11,14,2,2,L);}
+  }else if(pose==='climb'){
+    if(frame){R(4,4,1,4,S);R(11,7,1,3,S);R(5,12,2,3,L);R(9,12,2,4,L);}
+    else{R(4,7,1,3,S);R(11,4,1,4,S);R(5,12,2,4,L);R(9,12,2,3,L);}
+  }else if(pose==='hang'){
+    R(4,3,1,5,S);R(11,3,1,5,S);R(5,12,2,frame?4:3,L);R(9,12,2,frame?3:4,L);
+  }else if(pose==='fall'){
+    R(3,5,2,3,S);R(11,5,2,3,S);R(5,12,2,4,L);R(9,12,2,4,L);
+  }else{
+    R(4,8,1,3,S);R(11,8,1,3,S);R(5,12,2,4,L);R(9,12,2,4,L);
+  }
+  ctx.globalAlpha=1;
+}
+function poseOf(e){
+  const c=tile(Math.round(rx(e)),Math.round(ry(e)));
+  const fr=Math.floor((e.steps+e.t)*2)%2;
+  if(e.moving&&e.x===e.fx){
+    if(c==='H'||tile(e.x,e.y)==='H'||tile(e.fx,e.fy)==='H') return ['climb',fr];
+    return ['fall',0];
+  }
+  if(c==='-') return ['hang',fr];
+  if(c==='H'&&!isSolid(tile(e.x,e.y+1))) return ['climb',fr];
+  return e.moving?['run',fr]:['stand',0];
+}
+function draw(){
+  ctx.imageSmoothingEnabled=false;
+  ctx.fillStyle=C.shaft; ctx.fillRect(0,0,cv.width,cv.height);
+  if(!grid) return;
+  for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
+    const c=grid[y][x];
+    const s=c==='#'?spr.brick:c==='@'?spr.stone:c==='H'?(exitSet.has(idx(x,y))?spr.exit:spr.ladder):c==='-'?spr.rope:null;
+    if(s) ctx.drawImage(s,x*ts,y*ts);
+  }
+  for(const h of holes){
+    const age=HOLE-h.t; let f=0;
+    if(age<DIG) f=1-age/DIG; else if(h.t<REFILL) f=1-h.t/REFILL;
+    if(f>0){
+      const sh=Math.max(1,Math.round(ts*f));
+      ctx.globalAlpha=h.t<REFILL?(Math.floor(clock*10)%2?0.55:0.9):1;
+      ctx.drawImage(spr.brick,0,ts-sh,ts,sh,h.x*ts,h.y*ts+ts-sh,ts,sh);
+      ctx.globalAlpha=1;
+    }
+  }
+  for(let i=0;i<N;i++) if(gold[i]){
+    const x=i%COLS,y=(i/COLS)|0; ctx.drawImage(spr.gold,x*ts,y*ts);
+    if(Math.floor(clock*2+x*0.37+y*0.61)%4===0){const u=ts/16;ctx.fillStyle='#fff';ctx.fillRect(Math.round(x*ts+10*u),Math.round(y*ts+8*u),Math.max(1,Math.round(u)),Math.max(1,Math.round(u)));}
+  }
+  for(const g of guards){
+    if(g.dead) continue;
+    const [pose,fr]=g.inHole?['fall',0]:poseOf(g);
+    drawDude(g,g.gold?PAL_GG:PAL_G,pose,fr,g.spawn>0?(Math.floor(clock*14)%2?0.3:0.8):1);
+  }
+  if(player){
+    const [pose,fr]=poseOf(player);
+    let a=1; if(state==='dead') a=Math.floor(clock*16)%2?0.15:0.9;
+    drawDude(player,PAL_P,player.dig>0?'stand':pose,fr,a);
+  }
+}
+function fit(){
+  const r=stage.getBoundingClientRect(); if(r.width<10||r.height<10) return;
+  const dpr=Math.min(window.devicePixelRatio||1,3);
+  ts=Math.max(8,Math.floor(Math.min(r.width,r.height)*dpr/COLS));
+  cv.width=ts*COLS; cv.height=ts*ROWS;
+  cv.style.width=(ts*COLS/dpr)+'px'; cv.style.height=(ts*ROWS/dpr)+'px';
+  makeSprites(); draw();
+}
+
+/* ---------- 菜单 ---------- */
+function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e;}
+function btn(text,fn,primary){const b=el('button','btn'+(primary?' primary':''),text); b.type='button'; b.addEventListener('click',fn); return b;}
+function closeMenu(){menu=null; overlay.hidden=true;}
+function openMenu(kind){
+  menu=kind; card.textContent=''; overlay.hidden=false;
+  const no='B'+String(cur+1).padStart(2,'0');
+  if(kind==='pause'){
+    card.append(el('h2',null,'歇一会儿'),el('p',null,no+' '+LEVELS[cur].name+'　金块 '+goldGot+'/'+goldTotal));
+    const k=el('p','kbd-only','键盘：方向键 / WASD 移动，Z / X 挖左右，P 暂停，R 重来');
+    const bs=el('div','btns');
+    bs.append(btn('继续',closeMenu,true),btn('重来这一层',()=>{closeMenu();loadLevel(cur,true);}),btn('选层',()=>openMenu('levels')));
+    card.append(k,bs);
+  }else if(kind==='won'){
+    const last=cur===LEVELS.length-1;
+    card.append(el('h2',null,last?'十二层全部收工':no+' 收工'),
+      el('div','stat',fmt(time)+(attempts?'  ·  RETRY '+attempts:'')),
+      el('p',null,last?'最后一班结束，金块都带上来了。':'下一层：'+LEVELS[cur+1].name));
+    const bs=el('div','btns');
+    if(!last) bs.append(btn('下一层',()=>{closeMenu();loadLevel(cur+1);},true));
+    bs.append(btn('再挖一次',()=>{closeMenu();loadLevel(cur);},last),btn('选层',()=>openMenu('levels')));
+    card.append(bs);
+  }else if(kind==='levels'){
+    card.append(el('h2',null,'选一层'));
+    const g=el('div','levels');
+    LEVELS.forEach((L,i)=>{
+      const b=el('button','lvbtn'+(save.done[i]!=null?' done':'')+(i===cur?' cur':''));
+      b.type='button'; b.setAttribute('aria-label','B'+String(i+1).padStart(2,'0')+' '+L.name);
+      b.append(el('span',null,'B'+String(i+1).padStart(2,'0')),el('small',null,save.done[i]!=null?fmt(save.done[i]):L.name));
+      b.addEventListener('click',()=>{closeMenu();loadLevel(i);});
+      g.append(b);
+    });
+    const bs=el('div','btns'); bs.append(btn('回到 '+no,()=>{ if(state==='won') openMenu('won'); else closeMenu(); }));
+    card.append(g,bs);
+  }
+}
+
+/* ---------- 输入 ---------- */
+function unlockAudio(){ if(!save.sound) return; try{actx=actx||new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume();}catch(e){} }
+function wake(){ unlockAudio(); if(menu) return false; if(state==='ready'){state='play';banner.hidden=true;} return state==='play'; }
+function press(dir){ if(!wake()) return; input.held=dir; input.queued=dir; input.queuedT=0.22; }
+function release(dir){ if(input.held===dir) input.held=null; }
+function dig(d){ if(!wake()) return; digReq={dir:d,ttl:0.3}; }
+
+let padId=null;
+function padDir(e){
+  const r=dpad.getBoundingClientRect(),dx=e.clientX-(r.left+r.width/2),dy=e.clientY-(r.top+r.height/2);
+  if(Math.hypot(dx,dy)<r.width*0.1) return input.held;
+  return Math.abs(dx)>Math.abs(dy)?(dx>0?'R':'L'):(dy>0?'D':'U');
+}
+function padSet(d){ if(d&&d!==input.held) press(d); if(d) dpad.dataset.dir=d; else delete dpad.dataset.dir; }
+dpad.addEventListener('pointerdown',e=>{e.preventDefault(); if(padId!==null) return; padId=e.pointerId;try{dpad.setPointerCapture(padId);}catch(_){ } input.held=null; padSet(padDir(e)||'');});
+dpad.addEventListener('pointermove',e=>{if(e.pointerId===padId) padSet(padDir(e));});
+const padUp=e=>{if(e.pointerId!==padId) return; padId=null; input.held=null; delete dpad.dataset.dir;};
+dpad.addEventListener('pointerup',padUp); dpad.addEventListener('pointercancel',padUp);
+
+[['digL',-1],['digR',1]].forEach(([id,d])=>{
+  const b=$(id);
+  b.addEventListener('pointerdown',e=>{e.preventDefault();b.classList.add('on');dig(d);});
+  const off=()=>b.classList.remove('on');
+  b.addEventListener('pointerup',off); b.addEventListener('pointercancel',off); b.addEventListener('pointerleave',off);
+});
+const KEY={ArrowLeft:'L',ArrowRight:'R',ArrowUp:'U',ArrowDown:'D',a:'L',d:'R',w:'U',s:'D'};
+const keysDown=[];
+addEventListener('keydown',e=>{
+  if(e.metaKey||e.ctrlKey||e.altKey){keysDown.length=0;input.held=null;return;}
+  const k=e.key.length===1?e.key.toLowerCase():e.key;
+  if(KEY[k]){e.preventDefault(); if(e.repeat) return; const d=KEY[k]; if(!keysDown.includes(d)) keysDown.push(d); press(d); return;}
+  if(k==='z'||k==='q'){e.preventDefault(); if(!e.repeat) dig(-1); return;}
+  if(k==='x'||k==='e'){e.preventDefault(); if(!e.repeat) dig(1); return;}
+  if(k==='p'||k==='Escape'){e.preventDefault(); if(menu==='pause') closeMenu(); else if(!menu&&state!=='won') openMenu('pause'); return;}
+  if(k==='r'&&!menu){loadLevel(cur,true);}
+});
+addEventListener('keyup',e=>{
+  const k=e.key.length===1?e.key.toLowerCase():e.key, d=KEY[k]; if(!d) return;
+  const i=keysDown.indexOf(d); if(i>=0) keysDown.splice(i,1);
+  if(input.held===d) input.held=keysDown.length?keysDown[keysDown.length-1]:null;
+});
+addEventListener('blur',()=>{keysDown.length=0;input.held=null;});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&state==='play'&&!menu) openMenu('pause');});
+$('app').addEventListener('contextmenu',e=>e.preventDefault());
+
+$('btnPause').addEventListener('click',()=>{ if(menu==='pause') closeMenu(); else if(!menu&&state!=='won') openMenu('pause'); });
+$('btnLevels').addEventListener('click',()=>{ if(menu==='levels'){ if(state==='won') openMenu('won'); else closeMenu(); } else openMenu('levels'); });
+function paintSound(){ $('sndOn').toggleAttribute('hidden',!save.sound); $('sndOff').toggleAttribute('hidden',save.sound); $('btnSound').setAttribute('aria-pressed',String(save.sound)); }
+$('btnSound').addEventListener('click',()=>{save.sound=!save.sound; persist(); paintSound(); if(save.sound) tone(880,.08);});
+
+/* ---------- 启动 ---------- */
+let last=0;
+function frame(now){
+  const dt=Math.min(0.05,Math.max(0,(now-last)/1000)); last=now; clock+=dt;
+  if(!menu){
+    if(state==='play') update(dt);
+    else if(state==='dead'){deadT-=dt; if(deadT<=0) loadLevel(cur,true);}
+    else if(state==='won'&&wonT>0){wonT-=dt; if(wonT<=0) openMenu('won');}
+  }
+  draw();
+  requestAnimationFrame(frame);
+}
+function boot(data){
+  const want=data&&Number.isInteger(data.level)?data.level:save.last;
+  loadLevel(Math.min(LEVELS.length-1,Math.max(0,want|0)));
+  paintSound();
+  try{const f=document.createElement('link'); f.rel='stylesheet'; f.href='https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap'; document.head.appendChild(f);}catch(e){}
+  new ResizeObserver(fit).observe(stage); fit();
+  if(document.fonts&&document.fonts.ready) document.fonts.ready.then(fit).catch(()=>{});
+  requestAnimationFrame(t=>{last=t;frame(t);});
+}
+try{window.claude?.hot?.snapshot?.(()=>({level:cur}));}catch(e){}
+if(window.claude?.hot?.ready) window.claude.hot.ready(boot); else boot(window.claude?.hot?.data??{});
+// 供自动化测试读取状态，不影响游戏
+window.__yeban={get s(){return {state,cur,goldGot,goldTotal,exitOpen,px:player.x,py:player.y,guards:guards.length,holes:holes.length,menu};}};
+})();
+</script>
+</body>
+</html>

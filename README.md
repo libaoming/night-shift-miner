@@ -23,12 +23,13 @@ Open `index.html` in any browser. On a phone, the easiest route is GitHub Pages 
 
 - Collect every gold bar. The exit ladder then drops from the top; climb to the top row to finish the level.
 - You can dig brick diagonally below you. Grey stone cannot be dug.
-- You can jump: hold a direction and jump over a one-tile gap, or up onto a one-tile-high ledge. Guards cannot jump. There is a short cooldown between jumps.
+- You can jump: hold a direction and jump over a one-tile gap, or up onto a one-tile-high ledge. The arc is high enough to clear a guard's head. Guards cannot jump.
 - Slow motion slows everything — you, the guards, and the hole countdown — to 0.1×. Press again to go back to full speed.
-- A hole closes after 8.5 seconds. Anything still inside is crushed, you included.
-- Guards cannot see holes. A guard that falls in is stuck for 3.6 seconds, and you can walk across its head.
+- Stuck? Pause and tap "Point the way" — an arrow shows the optimal next step (guards are ignored; gold a guard carries counts as being under it).
+- A hole closes after 7 seconds. Anything still inside is crushed, you included.
+- Guards cannot see holes. A guard that falls in is stuck for 3.4 seconds, and you can walk across its head.
 - Guards pick up gold. Trap one and the gold drops at the edge of the hole.
-- There are 12 levels (B01 to B12). All are open from the start; your best time per level is saved in the browser.
+- There are 12 levels (B01 to B12). All are open from the start; your best time per level is saved in the browser. The screen stays awake while you play.
 
 ## How it works
 
@@ -71,7 +72,7 @@ node tools/solver.js index.html
 
 The solver runs a BFS over (position × collected gold) for every level and fails if a level cannot be finished. It ignores guards and uses a conservative digging model (one hole at a time), so a pass means the level is completable without multi-hole tricks. It does not prove a level is fair against the guards. Each level is solved twice, without and with jump moves; if jumping cuts the shortest solution below 55% of the no-jump one, the solver prints a WARN so the level can be reviewed by hand.
 
-`tools/e2e.js` is a twelve-step browser smoke test (walk, climb, dig, fall, pick up gold, jump, slow motion, pause, hole refill). Paste it into the console on level B01, or run it with a headless browser.
+`tools/e2e.js` is a fourteen-step browser smoke test (walk, climb, dig, fall, pick up gold, jump, slow motion, hint, pause, hole refill). Paste it into the console on level B01, or run it with a headless browser.
 
 ## Credits
 

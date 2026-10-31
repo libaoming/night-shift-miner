@@ -100,6 +100,10 @@ button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:12px;font-weight:600}
 .dig svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
 .dig.on,.dig:active{background:var(--rust);color:#fff}
+@keyframes hintPulse{50%{opacity:.3}}
+#dpad .arm.hint{fill:var(--gold);animation:hintPulse .5s linear 4}
+.dig.hint{background:var(--rust);color:#fff;animation:hintPulse .5s linear 4}
+.jump.hint{background:var(--gold);color:#241803;animation:hintPulse .5s linear 4}
 .jump{width:clamp(74px,min(20vw,14vh),90px);aspect-ratio:1;border-radius:50%;touch-action:none;
   background:var(--gold-deep);box-shadow:inset 0 0 0 3px var(--gold);color:#ffedc2;
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-size:13px;font-weight:700}
@@ -395,8 +399,8 @@ const LEVELS=[
 /*LEVELS-END*/
 
 // 速度单位：格/秒；时间单位：秒
-const RUN=6.2, CLIMB=5.2, FALL=9, GUARD=3.3, HOLE=8.5, TRAP=3.6, DIG=0.2, REFILL=1.2;
-const JUMP=2.9, JUMP_CD=0.32, SLOW=0.1; // JUMP 是跳跃全程进度速率（一次跳两格，约 0.34 秒）
+const RUN=6.2, CLIMB=5.2, FALL=9, GUARD=3.3, HOLE=7, TRAP=3.4, DIG=0.2, REFILL=1.2;
+const JUMP=2.9, JUMP_CD=0.32, SLOW=0.1, JUMP_ARC=0.7; // JUMP 是跳跃全程进度速率（一次跳两格，约 0.34 秒）；JUMP_ARC 是跳跃弧顶高度（格）
 const N=COLS*ROWS;
 const DX=[-1,1,0,0], DY=[0,0,-1,1];
 const DIRK={L:0,R:1,U:2,D:3};
@@ -444,17 +448,53 @@ const sfx={
   gold(){tone(880,.07);tone(1320,.12,'square',.05,0,.07);},
   dig(){tone(190,.13,'sawtooth',.05,-110);},
   trap(){tone(140,.12,'square',.05,-60);},
-  die(){tone(320,.5,'sawtooth',.06,-270);},
+  die(){tone(320,.5,'sawtooth',.06,-270);noise(.3,.06,700);},
+  crush(){noise(.22,.07,300);tone(90,.18,'square',.05,-40);},
   exit(){tone(660,.1);tone(880,.1,'square',.05,0,.1);tone(1100,.2,'square',.05,0,.2);},
   win(){[523,659,784,1047].forEach((f,i)=>tone(f,.14,'square',.05,0,i*.11));}
 };
+function noise(dur,vol,cut,delay){
+  if(!save.sound) return;
+  try{
+    actx=actx||new (window.AudioContext||window.webkitAudioContext)();
+    if(actx.state==='suspended') actx.resume();
+    const n=Math.floor(actx.sampleRate*dur),buf=actx.createBuffer(1,n,actx.sampleRate),d=buf.getChannelData(0);
+    for(let i=0;i<n;i++) d[i]=(Math.random()*2-1)*(1-i/n);
+    const src=actx.createBufferSource(),f=actx.createBiquadFilter(),g=actx.createGain();
+    src.buffer=buf; f.type='lowpass'; f.frequency.value=cut||800;
+    g.gain.setValueAtTime(vol||.05,actx.currentTime+(delay||0));
+    g.gain.exponentialRampToValueAtTime(0.0001,actx.currentTime+(delay||0)+dur);
+    src.connect(f); f.connect(g); g.connect(actx.destination);
+    src.start(actx.currentTime+(delay||0));
+  }catch(e){}
+}
+/* 粒子：格子坐标，捡金/被困/死亡的小爆发 */
+let particles=[];
+function burst(x,y,col,n){
+  for(let i=0;i<(n||8);i++){
+    const a=Math.random()*Math.PI*2,sp=1.5+Math.random()*3;
+    particles.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-1.5,life:.5+Math.random()*.3,col});
+  }
+}
 function buzz(ms){try{navigator.vibrate&&navigator.vibrate(ms);}catch(e){}}
+
+/* ---------- 屏幕常亮 ---------- */
+let wakeLock=null;
+async function keepAwake(){
+  try{
+    if('wakeLock' in navigator&&!wakeLock&&document.visibilityState==='visible'){
+      wakeLock=await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release',()=>{wakeLock=null;});
+    }
+  }catch(e){}
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden) keepAwake();});
 
 /* ---------- 关卡 ---------- */
 function mkEnt(x,y){return {x,y,fx:x,fy:y,t:1,moving:false,spd:RUN,face:1,steps:0,falling:false,jumpCd:0,jump:false};}
 function loadLevel(i,keepAttempts){
   cur=i; const L=LEVELS[i];
-  grid=[]; gold=new Uint8Array(N); hidden=[]; exitSet=new Set(); holes=[]; guards=[]; goldTotal=0;
+  grid=[]; gold=new Uint8Array(N); hidden=[]; exitSet=new Set(); holes=[]; guards=[]; goldTotal=0; particles=[];
   for(let y=0;y<ROWS;y++){
     const row=[];
     for(let x=0;x<COLS;x++){
@@ -468,7 +508,7 @@ function loadLevel(i,keepAttempts){
     }
     grid.push(row);
   }
-  goldGot=0; exitOpen=false; time=0; state='ready'; digReq=null; jumpReq=null; timeScale=1; paintSlow(); input.queued=null; input.held=null; keysDown.length=0; delete dpad.dataset.dir;
+  goldGot=0; exitOpen=false; time=0; state='ready'; digReq=null; jumpReq=null; hintArrow=null; timeScale=1; paintSlow(); input.queued=null; input.held=null; keysDown.length=0; delete dpad.dataset.dir;
   if(!keepAttempts) attempts=0;
   save.last=i; persist();
   $('lvno').textContent='B'+String(i+1).padStart(2,'0');
@@ -549,7 +589,7 @@ function playerArrive(){
   const p=player,i=idx(p.x,p.y);
   p.jump=false;
   if(gold[i]){
-    gold[i]=0; goldGot++; sfx.gold(); buzz(8);
+    gold[i]=0; goldGot++; sfx.gold(); buzz(8); burst(p.x,p.y,'#f4b93e',10);
     if(goldGot===goldTotal) openExit();
     updateCount();
   }
@@ -619,7 +659,7 @@ function guardChoose(g){
 function guardArrive(g){
   const i=idx(g.x,g.y);
   if(tile(g.x,g.y)==='o'){
-    g.inHole=true; g.trapped=TRAP; sfx.trap();
+    g.inHole=true; g.trapped=TRAP; sfx.trap(); burst(g.x,g.y,'#e4588c',8);
     if(g.gold&&tile(g.x,g.y-1)===' '&&!gold[idx(g.x,g.y-1)]){gold[idx(g.x,g.y-1)]=1;g.gold=false;}
     return;
   }
@@ -653,8 +693,18 @@ function updateGuard(g,dt){
 
 /* ---------- 每帧 ---------- */
 function inTile(e,x,y){return (e.x===x&&e.y===y)||(Math.round(rx(e))===x&&Math.round(ry(e))===y);}
+/* 粒子和指路箭头的推进：暂停外的所有状态都走（死亡/结算时特效照常播） */
+function stepFx(dt){
+  if(hintArrow){hintArrow.t-=dt; if(hintArrow.t<=0) hintArrow=null;}
+  for(let i=particles.length-1;i>=0;i--){
+    const q=particles[i]; q.life-=dt;
+    if(q.life<=0){particles.splice(i,1);continue;}
+    q.x+=q.vx*dt; q.y+=q.vy*dt; q.vy+=8*dt;
+  }
+}
 function update(dt){
   time+=dt;
+  stepFx(dt);
   if(input.queued){input.queuedT-=dt; if(input.queuedT<=0) input.queued=null;}
   if(digReq){digReq.ttl-=dt; if(digReq.ttl<=0) digReq=null;}
   if(jumpReq){jumpReq.ttl-=dt; if(jumpReq.ttl<=0) jumpReq=null;}
@@ -662,23 +712,25 @@ function update(dt){
     const h=holes[i]; h.t-=dt;
     if(h.t<=0){
       grid[h.y][h.x]='#'; holes.splice(i,1);
-      for(const g of guards) if(!g.dead&&inTile(g,h.x,h.y)){g.dead=true;g.inHole=false;g.moving=false;g.respawn=1.2;}
+      for(const g of guards) if(!g.dead&&inTile(g,h.x,h.y)){g.dead=true;g.inHole=false;g.moving=false;g.respawn=1.2;burst(h.x,h.y,'#c2603f',12);sfx.crush();}
       if(inTile(player,h.x,h.y)){die();return;}
     }
   }
   updatePlayer(dt);
   if(state!=='play') return;
   for(const g of guards) updateGuard(g,dt);
-  const px=rx(player),py=ry(player);
+  const jumph=player.jump&&player.moving?Math.sin(player.t*Math.PI)*JUMP_ARC:0;
+  const px=rx(player),py=ry(player)-jumph;
+  const near=jumph>0?0.3:0.6; // 跳跃中身位判定收窄：|dx|<0.3 时弧高已超过 0.6，能从守卫头顶飞过去
   for(const g of guards){
     if(g.dead||g.spawn>0) continue;
-    if(Math.abs(rx(g)-px)<0.6&&Math.abs(ry(g)-py)<0.6){die();return;}
+    if(Math.abs(rx(g)-px)<near&&Math.abs(ry(g)-py)<0.6){die();return;}
   }
   if(bannerT>0){bannerT-=dt; if(bannerT<=0) banner.hidden=true;}
 }
 function die(){
   if(state!=='play') return;
-  state='dead'; deadT=1.1; attempts++; sfx.die(); buzz(60); banner.hidden=true;
+  state='dead'; deadT=1.1; attempts++; sfx.die(); buzz(60); burst(rx(player),ry(player),'#e4588c',14); banner.hidden=true;
 }
 function win(){
   if(state!=='play') return;
@@ -710,7 +762,7 @@ function makeSprites(){
   spr.gold=mk(R=>{R(3,12,10,3,C.goldLo);R(4,11,8,3,C.gold);R(5,9,6,2,C.gold);R(6,9,4,1,C.goldHi);R(5,11,2,1,C.goldHi);});
 }
 function drawDude(e,pal,pose,frame,alpha){
-  const u=ts/16,ox=rx(e)*ts,oy=ry(e)*ts-(e.jump&&e.moving?Math.sin(e.t*Math.PI)*ts*0.5:0),face=e.face;
+  const u=ts/16,ox=rx(e)*ts+(e.inHole&&e.trapped>TRAP-0.8?Math.sin(clock*50)*0.04*ts:0),oy=ry(e)*ts-(e.jump&&e.moving?Math.sin(e.t*Math.PI)*ts*JUMP_ARC:0),face=e.face;
   const R=(x,y,w,h,col)=>{
     if(face<0) x=16-x-w;
     const x0=Math.round(ox+x*u),y0=Math.round(oy+y*u);
@@ -784,6 +836,24 @@ function draw(){
     let a=1; if(state==='dead') a=Math.floor(clock*16)%2?0.15:0.9;
     drawDude(player,PAL_P,player.dig>0?'stand':pose,fr,a);
   }
+  for(const q of particles){
+    ctx.globalAlpha=Math.min(1,q.life*3);
+    ctx.fillStyle=q.col;
+    ctx.fillRect(Math.round(q.x*ts+ts*0.4),Math.round(q.y*ts+ts*0.4),Math.max(2,Math.round(ts*0.2)),Math.max(2,Math.round(ts*0.2)));
+    ctx.globalAlpha=1;
+  }
+  if(hintArrow){
+    const a=hintArrow,cx=(a.x+0.5)*ts,cy=(a.y+0.5)*ts,r=ts*0.42;
+    ctx.save();
+    ctx.globalAlpha=Math.min(1,a.t);
+    ctx.translate(cx+a.dx*ts*0.55,cy+a.dy*ts*0.55);
+    ctx.rotate(Math.atan2(a.dy,a.dx));
+    ctx.fillStyle='#f4b93e';
+    ctx.beginPath();
+    ctx.moveTo(r,0);ctx.lineTo(-r*0.6,-r*0.62);ctx.lineTo(-r*0.2,0);ctx.lineTo(-r*0.6,r*0.62);
+    ctx.closePath();ctx.fill();
+    ctx.restore();
+  }
 }
 function fit(){
   const r=stage.getBoundingClientRect(); if(r.width<10||r.height<10) return;
@@ -794,6 +864,71 @@ function fit(){
   makeSprites(); draw();
 }
 
+/* ---------- 指路：忽略守卫的保守 BFS，从当前局面算最优第一步 ---------- */
+let hintArrow=null;
+function solveNext(){
+  const p=player;
+  const gi=new Map();
+  for(let i=0;i<N;i++) if(gold[i]) gi.set(i,gi.size);
+  for(const g of guards) if(!g.dead&&g.gold&&!gi.has(idx(g.x,g.y))) gi.set(idx(g.x,g.y),gi.size); // 守卫手上的金算在它脚下
+  const FULL=(1<<gi.size)-1;
+  // 收齐金块后出口梯才放下来：BFS 在 mask 满时把 hidden 出口格当梯子（与游戏 openExit 一致）
+  const hidSet=new Set(hidden.map(([hx,hy])=>idx(hx,hy)));
+  const gT=(x,y,mk)=>{ if(x<0||x>=COLS||y<0||y>=ROWS) return '@'; const c=tile(x,y); if(c==='o') return ' '; if(mk===FULL&&!exitOpen&&hidSet.has(idx(x,y))) return 'H'; return c;};
+  const solC=c=>c==='#'||c==='@';
+  const sol=(x,y,mk)=>solC(gT(x,y,mk));
+  const sup=(x,y,mk)=>{const c=gT(x,y,mk),b=gT(x,y+1,mk);return c==='H'||c==='-'||solC(b)||b==='H';};
+  const key=(x,y,mk)=>(mk*ROWS+y)*COLS+x;
+  const seen=new Set([key(p.x,p.y,0)]);
+  const q=[[p.x,p.y,0,null]];
+  const t0=performance.now();
+  for(let h=0;h<q.length;h++){
+    if((h&8191)===0&&performance.now()-t0>80) return 'slow'; // 状态太多算不动，和「无解」分开报
+    const [x,y,mk,a0]=q[h];
+    if(mk===FULL&&y===0) return a0;
+    const push=(nx,ny,a)=>{const i=idx(nx,ny);let m=mk; if(i>=0&&i<N&&gi.has(i)) m|=1<<gi.get(i); const k=key(nx,ny,m); if(seen.has(k))return; seen.add(k); q.push([nx,ny,m,a0||a]);};
+    const c=gT(x,y,mk);
+    if(!sup(x,y,mk)){push(x,y+1,{kind:'move',dir:'D'});continue;}
+    for(const d of [-1,1]){
+      const D=d<0?'L':'R';
+      if(!sol(x+d,y,mk)) push(x+d,y,{kind:'move',dir:D});
+      // 跳：平跳优先，走不通再斜上（与 playerChoose 同序）
+      if(!sol(x+d,y,mk)&&!sol(x+2*d,y,mk)) push(x+2*d,y,{kind:'jump',dir:D});
+      else if(!sol(x,y-1,mk)&&!sol(x+d,y-1,mk)&&!sol(x+2*d,y-1,mk)) push(x+2*d,y-1,{kind:'jump',dir:D});
+      // 挖：斜下是砖、身前是空、身前没有还没收的金（掩码判：收进 mask 的不拦）
+      const tx=x+d,ti=idx(tx,y);
+      const blockedByGold=gi.has(ti)&&!(mk&(1<<gi.get(ti)));
+      if(gT(tx,y+1,mk)==='#'&&gT(tx,y,mk)===' '&&!blockedByGold){
+        if(!sol(tx,y+2,mk)) push(tx,y+2,{kind:'dig',dir:d});       // 穿过洞往下
+        for(const s2 of [-1,1]) if(!sol(tx+s2,y+1,mk)) push(tx+s2,y+1,{kind:'dig',dir:d}); // 从洞里横着出去
+      }
+    }
+    if(c==='H'&&!sol(x,y-1,mk)) push(x,y-1,{kind:'move',dir:'U'});
+    if(!sol(x,y+1,mk)) push(x,y+1,{kind:'move',dir:'D'});
+  }
+  return null;
+}
+function showHint(){
+  const a=solveNext();
+  if(a==='slow'){showBanner('这层太绕','这一步短时间算不出来，先自己试试。','',3);return;}
+  if(!a){showBanner('想不出来','这一步算不出来，按 R 重来试试。','',3);return;}
+  const dp={L:[-1,0],R:[1,0],U:[0,-1],D:[0,1]};
+  if(a.kind==='jump'){
+    hintArrow={x:player.x,y:player.y,dx:dp[a.dir][0],dy:0,t:2};
+    const bj=$('btnJump');
+    bj.classList.add('hint');setTimeout(()=>bj.classList.remove('hint'),2000);
+  }else if(a.kind==='move'){
+    hintArrow={x:player.x,y:player.y,dx:dp[a.dir][0],dy:dp[a.dir][1],t:2};
+    const arm=document.querySelector('#dpad .arm[data-a="'+a.dir+'"]');
+    if(arm){arm.classList.add('hint');setTimeout(()=>arm.classList.remove('hint'),2000);}
+  }else{
+    hintArrow={x:player.x,y:player.y,dx:a.dir,dy:1,t:2};
+    const b=$(a.dir<0?'digL':'digR');
+    b.classList.add('hint');setTimeout(()=>b.classList.remove('hint'),2000);
+  }
+  const robber=guards.some(g=>!g.dead&&g.gold);
+  showBanner(a.kind==='jump'?'跳过去':'往这边走',robber?'朝箭头走。有金块在守卫手上，想办法困住它。':'朝箭头走。','',2);
+}
 /* ---------- 菜单 ---------- */
 function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e;}
 function btn(text,fn,primary){const b=el('button','btn'+(primary?' primary':''),text); b.type='button'; b.addEventListener('click',fn); return b;}
@@ -805,7 +940,7 @@ function openMenu(kind){
     card.append(el('h2',null,'歇一会儿'),el('p',null,no+' '+LEVELS[cur].name+'　金块 '+goldGot+'/'+goldTotal));
     const k=el('p','kbd-only','键盘：方向键 / WASD 移动，Z / X 挖左右，空格跳，Shift 时缓，P 暂停，R 重来');
     const bs=el('div','btns');
-    bs.append(btn('继续',closeMenu,true),btn('重来这一层',()=>{closeMenu();loadLevel(cur,true);}),btn('选层',()=>openMenu('levels')));
+    bs.append(btn('继续',closeMenu,true),btn('指个路',()=>{closeMenu();showHint();}),btn('重来这一层',()=>{closeMenu();loadLevel(cur,true);}),btn('选层',()=>openMenu('levels')));
     card.append(k,bs);
   }else if(kind==='won'){
     const last=cur===LEVELS.length-1;
@@ -833,7 +968,7 @@ function openMenu(kind){
 
 /* ---------- 输入 ---------- */
 function unlockAudio(){ if(!save.sound) return; try{actx=actx||new (window.AudioContext||window.webkitAudioContext)(); if(actx.state==='suspended') actx.resume();}catch(e){} }
-function wake(){ unlockAudio(); if(menu) return false; if(state==='ready'){state='play';banner.hidden=true;} return state==='play'; }
+function wake(){ unlockAudio(); keepAwake(); if(menu) return false; if(state==='ready'){state='play';banner.hidden=true;} return state==='play'; }
 function press(dir){ if(!wake()) return; input.held=dir; input.queued=dir; input.queuedT=0.22; }
 function release(dir){ if(input.held===dir) input.held=null; }
 function dig(d){ if(!wake()) return; digReq={dir:d,ttl:0.3}; }
@@ -854,7 +989,12 @@ let padId=null;
 function padDir(e){
   const r=dpad.getBoundingClientRect(),dx=e.clientX-(r.left+r.width/2),dy=e.clientY-(r.top+r.height/2);
   if(Math.hypot(dx,dy)<r.width*0.1) return input.held;
-  return Math.abs(dx)>Math.abs(dy)?(dx>0?'R':'L'):(dy>0?'D':'U');
+  // bias：当前方向带粘性，另一轴要超出 1.25 倍才换向，滑过对角线不易误触
+  const ax=Math.abs(dx),ay=Math.abs(dy),cd=input.held,bias=1.25;
+  let horiz=ax>ay;
+  if(cd==='L'||cd==='R') horiz=ay<ax*bias;
+  else if(cd==='U'||cd==='D') horiz=ax>ay*bias;
+  return horiz?(dx>0?'R':'L'):(dy>0?'D':'U');
 }
 function padSet(d){ if(d&&d!==input.held) press(d); if(d) dpad.dataset.dir=d; else delete dpad.dataset.dir; }
 dpad.addEventListener('pointerdown',e=>{e.preventDefault(); if(padId!==null) return; padId=e.pointerId;try{dpad.setPointerCapture(padId);}catch(_){ } input.held=null; padSet(padDir(e)||'');});
@@ -903,8 +1043,8 @@ function frame(now){
   const dt=Math.min(0.05,Math.max(0,(now-last)/1000)); last=now; clock+=dt;
   if(!menu){
     if(state==='play') update(dt*timeScale);
-    else if(state==='dead'){deadT-=dt; if(deadT<=0) loadLevel(cur,true);}
-    else if(state==='won'&&wonT>0){wonT-=dt; if(wonT<=0) openMenu('won');}
+    else if(state==='dead'){stepFx(dt); deadT-=dt; if(deadT<=0) loadLevel(cur,true);}
+    else if(state==='won'&&wonT>0){stepFx(dt); wonT-=dt; if(wonT<=0) openMenu('won');}
   }
   draw();
   requestAnimationFrame(frame);
@@ -921,7 +1061,7 @@ function boot(data){
 try{window.claude?.hot?.snapshot?.(()=>({level:cur}));}catch(e){}
 if(window.claude?.hot?.ready) window.claude.hot.ready(boot); else boot(window.claude?.hot?.data??{});
 // 供自动化测试读取状态，不影响游戏
-window.__yeban={get s(){return {state,cur,goldGot,goldTotal,exitOpen,px:player.x,py:player.y,guards:guards.length,holes:holes.length,menu,tscale:timeScale,jumping:player.jump};}};
+window.__yeban={get s(){return {state,cur,goldGot,goldTotal,exitOpen,px:player.x,py:player.y,guards:guards.length,holes:holes.length,menu,tscale:timeScale,jumping:player.jump,hint:hintArrow?{dx:hintArrow.dx,dy:hintArrow.dy,t:Math.round(hintArrow.t*10)/10}:null};},solve:solveNext};
 })();
 </script>
 </body>

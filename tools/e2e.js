@@ -1,5 +1,5 @@
 // 端到端冒烟测试：在浏览器里打开 index.html（从第 1 层开始），把这段脚本整体丢进控制台或 `agent-browser eval`。
-// 返回 11 行 PASS/FAIL。只用键盘事件驱动，读 window.__yeban.s 判定。
+// 返回 12 行 PASS/FAIL。只用键盘事件驱动，读 window.__yeban.s 判定。
 (async()=>{
   const st=()=>window.__yeban.s, sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const key=(type,k)=>window.dispatchEvent(new KeyboardEvent(type,{key:k,bubbles:true}));

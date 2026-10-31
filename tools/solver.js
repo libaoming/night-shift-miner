@@ -49,10 +49,10 @@ LEVELS.forEach((L,li)=>{
         for(const sx of [-1,1]) if(!solid(T(g,tx+sx,ty))) push(tx+sx,ty,mk,d+3,digs+1); // 从洞里横着走出去
       }
       if(canJump) for(const jd of [-1,1]){
-        // 平跳：跨一格沟，落点与途经格都要进得去（与 playerChoose 同规则）
+        // 平跳：跨一格沟，落点与途经格都要进得去（与 playerChoose 同规则，可行时游戏不会再试斜上跳）
         if(!solid(T(g,x+jd,y))&&!solid(T(g,x+2*jd,y))) push(x+2*jd,y,mk,d+1,digs);
-        // 斜上跳：跨一格沟再上一格，头顶一路要清空
-        if(!solid(T(g,x,y-1))&&!solid(T(g,x+jd,y-1))&&!solid(T(g,x+2*jd,y-1))) push(x+2*jd,y-1,mk,d+1,digs);
+        // 斜上跳：仅当平跳走不通；跨一格沟再上一格，头顶一路要清空
+        else if(!solid(T(g,x,y-1))&&!solid(T(g,x+jd,y-1))&&!solid(T(g,x+2*jd,y-1))) push(x+2*jd,y-1,mk,d+1,digs);
       }
     }
     return null;

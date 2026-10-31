@@ -71,7 +71,7 @@ node tools/solver.js index.html
 
 The solver runs a BFS over (position × collected gold) for every level and fails if a level cannot be finished. It ignores guards and uses a conservative digging model (one hole at a time), so a pass means the level is completable without multi-hole tricks. It does not prove a level is fair against the guards. Each level is solved twice, without and with jump moves; if jumping cuts the shortest solution below 55% of the no-jump one, the solver prints a WARN so the level can be reviewed by hand.
 
-`tools/e2e.js` is an eleven-step browser smoke test (walk, climb, dig, fall, pick up gold, jump, slow motion, pause, hole refill). Paste it into the console on level B01, or run it with a headless browser.
+`tools/e2e.js` is a twelve-step browser smoke test (walk, climb, dig, fall, pick up gold, jump, slow motion, pause, hole refill). Paste it into the console on level B01, or run it with a headless browser.
 
 ## Credits
 

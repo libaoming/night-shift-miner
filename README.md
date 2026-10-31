@@ -13,7 +13,9 @@ Open `index.html` in any browser. On a phone, the easiest route is GitHub Pages 
 | Action | Touch | Keyboard |
 |---|---|---|
 | Move / climb | D-pad | Arrow keys or WASD |
+| Jump two tiles | 跳 | Space |
 | Dig lower-left / lower-right | 挖左 / 挖右 | Z / X (or Q / E) |
+| Toggle slow motion (0.1×) | 时缓 | Shift |
 | Pause | Pause button | P or Esc |
 | Restart level | Pause menu | R |
 
@@ -21,6 +23,8 @@ Open `index.html` in any browser. On a phone, the easiest route is GitHub Pages 
 
 - Collect every gold bar. The exit ladder then drops from the top; climb to the top row to finish the level.
 - You can dig brick diagonally below you. Grey stone cannot be dug.
+- You can jump: hold a direction and jump over a one-tile gap, or up onto a one-tile-high ledge. Guards cannot jump. There is a short cooldown between jumps.
+- Slow motion slows everything — you, the guards, and the hole countdown — to 0.1×. Press again to go back to full speed.
 - A hole closes after 8.5 seconds. Anything still inside is crushed, you included.
 - Guards cannot see holes. A guard that falls in is stuck for 3.6 seconds, and you can walk across its head.
 - Guards pick up gold. Trap one and the gold drops at the edge of the hole.
@@ -31,10 +35,10 @@ Open `index.html` in any browser. On a phone, the easiest route is GitHub Pages 
 ```
 requestAnimationFrame
   └─ frame(dt)
-       ├─ update(dt)                    only while state === 'play' and no menu is open
+       ├─ update(dt × timeScale)        only while state === 'play' and no menu is open
        │    ├─ holes: count down → refill → crush whatever is inside
        │    ├─ updatePlayer             playerChoose → startMove → advance → playerArrive
-       │    │                           (gravity, input, dig, gold pickup, exit check)
+       │    │                           (gravity, input, dig, jump, gold pickup, exit check)
        │    ├─ updateGuard × n          guardAI (BFS towards the player; holes look solid)
        │    │                           → guardChoose → advance → guardArrive (trap, gold)
        │    └─ collision                guard within 0.6 tile of the player → die
@@ -65,9 +69,9 @@ Levels are 16×16 strings near the top of the script in `index.html`:
 node tools/solver.js index.html
 ```
 
-The solver runs a BFS over (position × collected gold) for every level and fails if a level cannot be finished. It ignores guards and uses a conservative digging model (one hole at a time), so a pass means the level is completable without multi-hole tricks. It does not prove a level is fair against the guards.
+The solver runs a BFS over (position × collected gold) for every level and fails if a level cannot be finished. It ignores guards and uses a conservative digging model (one hole at a time), so a pass means the level is completable without multi-hole tricks. It does not prove a level is fair against the guards. Each level is solved twice, without and with jump moves; if jumping cuts the shortest solution below 55% of the no-jump one, the solver prints a WARN so the level can be reviewed by hand.
 
-`tools/e2e.js` is a nine-step browser smoke test (walk, climb, dig, fall, pick up gold, pause, hole refill). Paste it into the console on level B01, or run it with a headless browser.
+`tools/e2e.js` is an eleven-step browser smoke test (walk, climb, dig, fall, pick up gold, jump, slow motion, pause, hole refill). Paste it into the console on level B01, or run it with a headless browser.
 
 ## Credits
 

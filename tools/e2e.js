@@ -1,5 +1,5 @@
 // 端到端冒烟测试：在浏览器里打开 index.html（从第 1 层开始），把这段脚本整体丢进控制台或 `agent-browser eval`。
-// 返回 9 行 PASS/FAIL。只用键盘事件驱动，读 window.__yeban.s 判定。
+// 返回 11 行 PASS/FAIL。只用键盘事件驱动，读 window.__yeban.s 判定。
 (async()=>{
   const st=()=>window.__yeban.s, sleep=ms=>new Promise(r=>setTimeout(r,ms));
   const key=(type,k)=>window.dispatchEvent(new KeyboardEvent(type,{key:k,bubbles:true}));
@@ -18,6 +18,17 @@
   ok('走进洞：穿过砖层落到 (6,14)', st().px===6&&st().py===14);
   key('keydown','ArrowRight'); await until(()=>st().goldGot>=1,3000); key('keyup','ArrowRight');
   ok('捡到第一块金', st().goldGot===1);
+  await sleep(150);
+  key('keydown','ArrowLeft'); await until(()=>st().px<=7,3000); key('keyup','ArrowLeft');
+  await sleep(300);
+  const jx=st().px;
+  key('keydown',' '); key('keyup',' ');
+  await until(()=>st().px<=jx-2,2000);
+  ok('空格：朝面朝方向平跳两格', st().px===jx-2&&st().py===14);
+  key('keydown','Shift'); await sleep(60); key('keyup','Shift');
+  ok('按 Shift：时缓开，世界变 0.1 倍', st().tscale===0.1);
+  key('keydown','Shift'); await sleep(60); key('keyup','Shift');
+  ok('再按 Shift：恢复原速', st().tscale===1);
   key('keydown','p'); await sleep(100);
   ok('按 P：暂停菜单打开', st().menu==='pause');
   const a=st().px; key('keydown','ArrowLeft'); await sleep(300); key('keyup','ArrowLeft');

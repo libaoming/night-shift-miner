@@ -1,10 +1,12 @@
 // 关卡求解器：忽略守卫，按游戏的移动规则做 BFS（位置 × 已收金块）。
 // 挖洞按保守模型算：挖一个洞、立刻穿过去，洞随即视为合上（不依赖多个洞同时存在）。
+// 每层算两遍：不跳（保守下限）和会跳（跳跃边与游戏 playerChoose 同规则）。
+// 会跳之后步数掉到不跳的 55% 以下，说明这层被跳跃跳坏了，打 WARN 人工复核。
 const fs=require('fs');
 const src=fs.readFileSync(process.argv[2],'utf8');
 const m=src.match(/\/\*LEVELS-START\*\/([\s\S]*?)\/\*LEVELS-END\*\//);
 const {COLS,ROWS,LEVELS}=new Function(m[1]+';return {COLS,ROWS,LEVELS};')();
-let bad=0;
+let bad=0,warn=0;
 LEVELS.forEach((L,li)=>{
   const tag='B'+String(li+1).padStart(2,'0')+' '+L.name;
   const errs=[];
@@ -27,30 +29,40 @@ LEVELS.forEach((L,li)=>{
   golds.forEach(([x,y])=>{ if(!sup(base,x,y)) errs.push('金块悬空 '+x+','+y); });
   // BFS
   const key=(x,y,mk)=>(mk*ROWS+y)*COLS+x;
-  const seen=new Map(); const q=[];
-  const push=(x,y,mk,d,digs)=>{ const i=gi.get(y*COLS+x); if(i!=null) mk|=1<<i; const k=key(x,y,mk); if(seen.has(k))return; seen.set(k,1); q.push([x,y,mk,d,digs]); };
-  push(P[0],P[1],0,0,0);
-  let ans=null, maxGold=0;
-  for(let h=0;h<q.length;h++){
-    const [x,y,mk,d,digs]=q[h]; const g=mk===FULL?open:base;
-    let cnt=0; for(let b=mk;b;b>>=1) cnt+=b&1; if(cnt>maxGold) maxGold=cnt;
-    if(mk===FULL&&y===0){ans=[d,digs];break;}
-    const c=T(g,x,y),b=T(g,x,y+1);
-    if(!sup(g,x,y)){push(x,y+1,mk,d+1,digs);continue;}
-    for(const dx of [-1,1]) if(!solid(T(g,x+dx,y))) push(x+dx,y,mk,d+1,digs);
-    if(c==='H'&&!solid(T(g,x,y-1))) push(x,y-1,mk,d+1,digs);
-    if(!solid(b)) push(x,y+1,mk,d+1,digs);
-    for(const dx of [-1,1]){
-      const tx=x+dx,ty=y+1, gidx=gi.get(y*COLS+tx);
-      if(T(g,tx,ty)!=='#'||T(g,tx,y)!==' ') continue;
-      if(gidx!=null&&!(mk&(1<<gidx))) continue;
-      if(!solid(T(g,tx,ty+1))) push(tx,ty+1,mk,d+3,digs+1);      // 穿过洞往下
-      for(const sx of [-1,1]) if(!solid(T(g,tx+sx,ty))) push(tx+sx,ty,mk,d+3,digs+1); // 从洞里横着走出去
+  const solve=canJump=>{
+    const seen=new Map(); const q=[];
+    const push=(x,y,mk,d,digs)=>{ const i=gi.get(y*COLS+x); if(i!=null) mk|=1<<i; const k=key(x,y,mk); if(seen.has(k))return; seen.set(k,1); q.push([x,y,mk,d,digs]); };
+    push(P[0],P[1],0,0,0);
+    for(let h=0;h<q.length;h++){
+      const [x,y,mk,d,digs]=q[h]; const g=mk===FULL?open:base;
+      if(mk===FULL&&y===0) return [d,digs];
+      const c=T(g,x,y),b=T(g,x,y+1);
+      if(!sup(g,x,y)){push(x,y+1,mk,d+1,digs);continue;}
+      for(const dx of [-1,1]) if(!solid(T(g,x+dx,y))) push(x+dx,y,mk,d+1,digs);
+      if(c==='H'&&!solid(T(g,x,y-1))) push(x,y-1,mk,d+1,digs);
+      if(!solid(b)) push(x,y+1,mk,d+1,digs);
+      for(const dx of [-1,1]){
+        const tx=x+dx,ty=y+1, gidx=gi.get(y*COLS+tx);
+        if(T(g,tx,ty)!=='#'||T(g,tx,y)!==' ') continue;
+        if(gidx!=null&&!(mk&(1<<gidx))) continue;
+        if(!solid(T(g,tx,ty+1))) push(tx,ty+1,mk,d+3,digs+1);      // 穿过洞往下
+        for(const sx of [-1,1]) if(!solid(T(g,tx+sx,ty))) push(tx+sx,ty,mk,d+3,digs+1); // 从洞里横着走出去
+      }
+      if(canJump) for(const jd of [-1,1]){
+        // 平跳：跨一格沟，落点与途经格都要进得去（与 playerChoose 同规则）
+        if(!solid(T(g,x+jd,y))&&!solid(T(g,x+2*jd,y))) push(x+2*jd,y,mk,d+1,digs);
+        // 斜上跳：跨一格沟再上一格，头顶一路要清空
+        if(!solid(T(g,x,y-1))&&!solid(T(g,x+jd,y-1))&&!solid(T(g,x+2*jd,y-1))) push(x+2*jd,y-1,mk,d+1,digs);
+      }
     }
-  }
+    return null;
+  };
   if(errs.length){console.log('FAIL',tag,errs.join('; '));bad++;return;}
-  if(!ans){console.log('FAIL',tag,'无解，最多收到 '+maxGold+'/'+golds.length);bad++;return;}
-  console.log('OK  ',tag.padEnd(10),'金块',String(golds.length).padStart(2),'守卫',guards.length,'最短',String(ans[0]).padStart(3),'步，其中挖',ans[1],'次');
+  const noJ=solve(false), ju=solve(true);
+  if(!noJ||!ju){console.log('FAIL',tag,noJ?'会跳反而无解':'无解');bad++;return;}
+  let note='';
+  if(ju[0]<Math.ceil(noJ[0]*0.55)){note='  WARN 跳跃后 '+ju[0]+' 步（不跳 '+noJ[0]+'），这层可能被跳坏，人工复核';warn++;}
+  console.log('OK  ',tag.padEnd(10),'金块',String(golds.length).padStart(2),'守卫',guards.length,'最短',String(noJ[0]).padStart(3),'步（会跳 '+String(ju[0]).padStart(3)+'）','其中挖',noJ[1],'次'+note);
 });
-console.log(bad?('RESULT: '+bad+' 关有问题'):'RESULT: ALL_SOLVABLE '+LEVELS.length);
+console.log(bad?('RESULT: '+bad+' 关有问题'+(warn?'，'+warn+' 关待复核':'')):('RESULT: ALL_SOLVABLE '+LEVELS.length+(warn?'，'+warn+' 关待复核':'')));
 process.exit(bad?1:0);
